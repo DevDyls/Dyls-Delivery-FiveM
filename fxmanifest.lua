@@ -1,9 +1,14 @@
 fx_version 'cerulean'
 game 'gta5'
 
-author 'DevDyls | 30/12/2024'
-description 'Delivery Script'
-version '1.0.0'
+author 'DevDyls | Created on: 28/12/2024'
+description 'FiveM Delivery Script with NativeUI Integration'
+version '2.0.0'
 
-client_script 'client/client.lua'
+-- NativeUI must be loaded first
+client_scripts {
+    'client/NativeUI.lua',
+    'client/client.lua'
+}
+
 server_script 'server/server.lua'

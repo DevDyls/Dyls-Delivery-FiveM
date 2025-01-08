@@ -1,94 +1,187 @@
 local deliveryInProgress = false
 local currentDeliveryPoint = nil
 local deliveryBlip = nil
+local spawnedVehicle = nil
+local courierSelection = nil
+local onDuty = false
 
+-- Import NativeUI and Initialize Properly
+local Menu = nil
+local _menuPool = NativeUI.CreatePool()
+
+-- Function to Send Notifications Above the Map
+function ShowNotification(msg)
+    SetNotificationTextEntry("STRING")
+    AddTextComponentString(msg)
+    DrawNotification(false, true)
+end
+
+-- Delivery Locations (Shared for All Couriers)
 local deliveryLocations = {
-    {x = 1157.0, y = -331.0, z = 68.0}, -- 411, Fuel Station, Westminster
-    {x = 1375.0, y = -586.0, z = 74.0}, -- 444, Nikola Pl, Westminster
-    {x = 1197.0, y = -3099.0, z = 5.0}, -- 18, London Gateway Ports
-    {x = -376.0, y = -1874.0, z = 20.0}, -- 88, Maze Bank Arena, Wembely
-    {x = 1275.0, y = -1721.0, z = 54.0}, -- 184, Armadillo Vista, Isle of Dogs
-    {x = 86.0, y = -1390.0, z = 29.0}, -- 134, Innocence Boulevard, Wembely
-    -- Add more locations as needed just copy and paste {x = 0, y = 0, z = 0}
+    {x = 1157.0, y = -331.0, z = 68.0}, -- Mirror Park Fuel Station (411)
+    {x = 1302.0, y = -528.0, z = 71.0}, -- Nikola Pl, Mirror Park
+    {x = 1301.0, y = -573.0, z = 71.0}, -- Nikola Pl, Mirror Park
+    {x = 906.0, y = -491.0, z = 59.0}, -- West Mirror Drive, Mirror Park
+    {x = 1154.0, y = -776.0, z = 57.0}, -- West Mirror Drive, Mirror Park
+    {x = -14.0, y = -1442.0, z = 31.0}, -- Forum Drive, Strawberry
+    {x = 85.0, y = -1958.0, z = 21.0}, -- Grove Street, Davis
+    {x = 1375.0, y = -586.0, z = 74.0}, -- Nikola Pl, Mirror Park
+    {x = 1197.0, y = -3099.0, z = 5.0}, -- LS Ports
+    {x = -376.0, y = -1874.0, z = 20.0}, -- Maze Bank Arena
+    {x = 1275.0, y = -1721.0, z = 54.0}, -- Armadillo Vista
+    {x = 86.0, y = -1390.0, z = 29.0} -- Innocence Boulevard
 }
 
-local allowedVehicles = {
-    "RUMPO3", -- Ford DPD Van
-    "MULE3", -- MAN Waitrose Lorry
-    "RUMPO", -- Ford Transit Custom
-    "POUNDER", -- Amazon Prime Lorry
-    "PONY2", -- Ford Royal Mail Van
-    "PONY", -- Ford Amazon Prime Van
-    "MULE", -- Iveco Tesco Van
-    "MULE2", -- MAN Tesco Lorry
-    "BOXVILLE" -- Argos Van
+-- Couriers and Vehicles with Liveries
+local courierOptions = {
+    {
+        name = "DPD",
+        vehicles = {
+            {model = "RUMPO", livery = 4},
+            {model = "RUMPO3", livery = 0}
+        }
+    },
+    {
+        name = "Waitrose",
+        vehicles = {
+            {model = "MULE3", livery = 0}
+        }
+    },
+    {
+        name = "Amazon Prime",
+        vehicles = {
+            {model = "POUNDER", livery = 0},
+            {model = "PONY", livery = 0}
+        }
+    },
+    {
+        name = "Royal Mail",
+        vehicles = {
+            {model = "PONY2", livery = 0},
+            {model = "RUMPO", livery = 3}
+        }
+    },
+    {
+        name = "Tesco",
+        vehicles = {
+            {model = "MULE2", livery = 0},
+            {model = "MULE", livery = 0}
+        }
+    },
+    {
+        name = "Argos",
+        vehicles = {
+            {model = "BOXVILLE", livery = 3}
+        }
+    }
 }
 
--- Function to check if the player's vehicle is allowed
-local function isVehicleAllowed(vehicle)
-    local vehicleModel = GetEntityModel(vehicle)
-    for _, allowedModel in ipairs(allowedVehicles) do
-        if vehicleModel == GetHashKey(allowedModel) then
-            return true
+-- Create the Menu for Courier Selection
+function CreateCourierMenu()
+    Menu = NativeUI.CreateMenu("Courier Selection", "Choose Your Delivery Service", 50, 100)
+    _menuPool:Add(Menu)
+
+    -- On Duty/Off Duty Toggle Button
+    local dutyToggleItem = NativeUI.CreateItem("Toggle Duty Status", "Go On/Off Duty for Deliveries")
+    Menu:AddItem(dutyToggleItem)
+    dutyToggleItem.Activated = function(sender, item)
+        onDuty = not onDuty
+        if onDuty then
+            ShowNotification("~g~You are now ON DUTY. Deliveries will be assigned automatically.")
+        else
+            ShowNotification("~r~You are now OFF DUTY.")
         end
     end
-    return false
-end
 
--- Function to list allowed vehicles in chat
-local function listAllowedVehicles()
-    local vehiclesList = ""
-    for _, vehicle in ipairs(allowedVehicles) do
-        vehiclesList = vehiclesList .. vehicle .. ", "
-    end
-    vehiclesList = vehiclesList:sub(1, -3) -- Remove the trailing comma and space
-    TriggerEvent('chat:addMessage', {args = {"^3Allowed Vehicles: ^7" .. vehiclesList}})
-end
-
-RegisterCommand('deliverystart', function()
-    if deliveryInProgress then
-        TriggerEvent('chat:addMessage', {args = {"^1You already have an active delivery!"}})
-        return
+    -- Force Delivery Option
+    local forceDeliveryItem = NativeUI.CreateItem("Force Delivery", "Force a delivery right now!")
+    Menu:AddItem(forceDeliveryItem)
+    forceDeliveryItem.Activated = function(sender, item)
+        if spawnedVehicle then
+            StartRandomDelivery()
+            ShowNotification("~y~A delivery has been forced and marked on your map!")
+        else
+            ShowNotification("~r~You need to spawn a vehicle first!")
+        end
     end
 
+    -- Courier Selection and Vehicle Spawning
+    for _, courier in ipairs(courierOptions) do
+        local courierSubMenu = _menuPool:AddSubMenu(Menu, courier.name, "Select your vehicle and start delivery")
+
+        for _, vehicle in ipairs(courier.vehicles) do
+            -- Spawn Vehicle Option
+            local spawnVehicleItem = NativeUI.CreateItem("Spawn " .. vehicle.model, "Spawn this delivery vehicle.")
+            courierSubMenu:AddItem(spawnVehicleItem)
+            spawnVehicleItem.Activated = function(sender, item)
+                SpawnCourierVehicle(vehicle.model, vehicle.livery)
+            end
+        end
+    end
+end
+
+-- Initialize the Menu When the Resource Starts
+CreateCourierMenu()
+
+-- F9 Keybind to Open the Menu
+CreateThread(function()
+    while true do
+        Wait(0)
+        _menuPool:ProcessMenus()
+        if IsControlJustPressed(0, 56) then -- F9 Key
+            Menu:Visible(not Menu:Visible())
+        end
+    end
+end)
+
+-- Function to Spawn a Vehicle with Correct Livery
+function SpawnCourierVehicle(vehicleModel, livery)
     local playerPed = PlayerPedId()
-    local vehicle = GetVehiclePedIsIn(playerPed, false)
+    local playerCoords = GetEntityCoords(playerPed)
 
-    if vehicle == 0 then
-        TriggerEvent('chat:addMessage', {args = {"^1You must be in a vehicle to start a delivery!"}})
-        listAllowedVehicles()
+    RequestModel(vehicleModel)
+    while not HasModelLoaded(vehicleModel) do Wait(0) end
+
+    -- Delete existing vehicle if any
+    if spawnedVehicle then DeleteEntity(spawnedVehicle) end
+
+    -- Spawn the vehicle
+    spawnedVehicle = CreateVehicle(GetHashKey(vehicleModel), playerCoords.x + 5, playerCoords.y, playerCoords.z, 0.0, true, false)
+    SetPedIntoVehicle(playerPed, spawnedVehicle, -1)
+
+    -- Apply the specified livery
+    SetVehicleLivery(spawnedVehicle, livery)
+    ShowNotification("~g~Your delivery vehicle with the correct livery has been spawned!")
+end
+
+-- Function to Start a Random Delivery
+function StartRandomDelivery()
+    if deliveryInProgress then
+        ShowNotification("~r~You already have an active delivery!")
         return
     end
 
-    if not isVehicleAllowed(vehicle) then
-        TriggerEvent('chat:addMessage', {args = {"^1Please be in the correct vehicle before starting a delivery!"}})
-        listAllowedVehicles()
-        return
-    end
+    deliveryInProgress = true
 
+    -- Select a Random Delivery Point
     local randomIndex = math.random(1, #deliveryLocations)
     currentDeliveryPoint = deliveryLocations[randomIndex]
 
-    -- Set waypoint on the map
+    -- Set Waypoint and Blip
     SetNewWaypoint(currentDeliveryPoint.x, currentDeliveryPoint.y)
 
-    if deliveryBlip then
-        RemoveBlip(deliveryBlip)
-    end
-
+    if deliveryBlip then RemoveBlip(deliveryBlip) end
     deliveryBlip = AddBlipForCoord(currentDeliveryPoint.x, currentDeliveryPoint.y, currentDeliveryPoint.z)
     SetBlipSprite(deliveryBlip, 1)
-    SetBlipDisplay(deliveryBlip, 4)
-    SetBlipScale(deliveryBlip, 1.0)
     SetBlipColour(deliveryBlip, 2)
     BeginTextCommandSetBlipName("STRING")
     AddTextComponentString("Delivery Location")
     EndTextCommandSetBlipName(deliveryBlip)
 
-    TriggerEvent('chat:addMessage', {args = {"^2Delivery started! Drive to the marked location."}})
-    deliveryInProgress = true
-end)
+    ShowNotification("~g~A new delivery has been assigned!")
+end
 
+-- Monitor Delivery Completion with Money Reward Notification
 CreateThread(function()
     while true do
         Wait(0)
@@ -102,17 +195,23 @@ CreateThread(function()
 
                 if distance < 3.0 then
                     TriggerServerEvent('delivery:complete')
-                    TriggerEvent('chat:addMessage', {args = {"^2Delivery completed successfully!"}})
-
+                    ShowNotification("~g~Delivery completed! You earned £" .. math.random(200, 500) .. "!")
                     deliveryInProgress = false
                     currentDeliveryPoint = nil
-
-                    if deliveryBlip then
-                        RemoveBlip(deliveryBlip)
-                        deliveryBlip = nil
-                    end
+                    if deliveryBlip then RemoveBlip(deliveryBlip) end
                 end
             end
+        end
+    end
+end)
+
+-- Automatic Deliveries Every Few Minutes (Auto-Start Only If On Duty)
+CreateThread(function()
+    while true do
+        Wait(5000) -- 5 minutes (300,000ms) 5 seconds for dev testing
+        if onDuty and spawnedVehicle and not deliveryInProgress then
+            StartRandomDelivery()
+            ShowNotification("~y~A new delivery has been automatically assigned!")
         end
     end
 end)
