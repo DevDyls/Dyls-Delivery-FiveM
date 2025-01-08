@@ -137,5 +137,5 @@ local courierOptions = {
 ```
 
 <h3 align="center">📽️ Showcase</h3>
-<p align="center"> <a href="https://youtu.be/wZFzSKlta9U">General Overview</a> | <a href="https://youtu.be/zHI5RbKSxYc">Permissions and Testing</a> <a href="https://youtu.be/duVNXJe4oac">Menu Testing</p> ```
+<p align="center"> <a href="https://youtu.be/wZFzSKlta9U">General Overview</a> | <a href="https://youtu.be/zHI5RbKSxYc">Permissions and Testing</a> | <a href="https://youtu.be/duVNXJe4oac">Menu Testing</p> ```
 <p align="center">please do not claim this as your's, do not resell as it is free, anyone can find this.</p>
